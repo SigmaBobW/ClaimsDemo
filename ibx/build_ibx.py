@@ -416,17 +416,41 @@ def place(node, r0, r1):
     return node
 
 
+
+def univ(key):
+    """A universal filter targets the same dimension on every page-scoped table."""
+    return [("t-ov", "o_" + key), ("t-geo", "g_" + key), ("t-proc", "p_" + key), ("t-fr", "f_" + key)]
+
+
+def local_bar(n, note, extra=(), rows=(13, 18)):
+    """Non-Overview tabs: universal filters live on Overview; show a pointer + page-local controls."""
+    add(text("note-%d" % n, '<span style="color:%s">**Universal filters apply to this tab.**</span>　<span style="color:%s">'
+             'Date, plan, encounter class, age, gender, risk, market and income are set on the Overview tab. %s</span>' % (NAVY, MUTED, note),
+             verticalAlign="center"))
+    add(button("b-edit-filters-%d" % n, "Edit filters on Overview", [{"effect": "navigate", "target": {"type": "page", "page": PG_OV}}],
+               bg=BLUE))
+    kids = [(None, "note-%d" % n, 1, 13, 1, 5), (None, "b-edit-filters-%d" % n, 13, 19 if extra else 25, 1, 5)]
+    add(container("flt-%d" % n, bg=CARD_ALT))
+    out = [el("note-%d" % n, 1, 13, 1, 5), el("b-edit-filters-%d" % n, 13, 19 if extra else 25, 1, 5)]
+    for ctl, c0, c1, r0, r1 in extra:
+        CTL.append(ctl)
+        out.append(el(ctl["id"], c0, c1, r0, r1))
+    return place(box("flt-%d" % n, 1, 25, 0, 0, out), *rows)
+
 # ====================================================================== PAGE 1 -- Overview
 def page_overview():
-    nodes = [header(1, "Claims Overview", "Spend, utilization and denials across Independence's Ohio membership — filter once, everything responds.")]
+    nodes = [header(1, "Claims Overview", "Spend, utilization and denials across Independence's Ohio membership — these filters drive every tab.")]
     T, S = OV, "t-ov"
+    S0 = "t-ov"
     ctls = [
-        (ctl_date("c-ov-date", "ov_date", "Service date", [(S, "o_sdate")]), 1, 7, 1, 5),
-        (ctl_list("c-ov-plan", "ov_plan", "Plan", S, "o_plan", [(S, "o_plan")]), 7, 11, 1, 5),
-        (ctl_list("c-ov-class", "ov_class", "Encounter class", S, "o_eclass", [(S, "o_eclass")]), 11, 15, 1, 5),
-        (ctl_list("c-ov-age", "ov_age", "Age group", S, "o_ageg", [(S, "o_ageg")]), 15, 19, 1, 5),
-        (ctl_list("c-ov-gender", "ov_gender", "Gender", S, "o_gender", [(S, "o_gender")]), 19, 22, 1, 5),
-        (ctl_list("c-ov-risk", "ov_risk", "Risk score", S, "o_risk", [(S, "o_risk")]), 22, 25, 1, 5),
+        (ctl_date("c-ov-date", "ov_date", "Service date", univ("sdate")), 1, 6, 1, 5),
+        (ctl_list("c-ov-plan", "ov_plan", "Plan", S0, "o_plan", univ("plan")), 6, 9, 1, 5),
+        (ctl_list("c-ov-class", "ov_class", "Encounter class", S0, "o_eclass", univ("eclass")), 9, 12, 1, 5),
+        (ctl_list("c-ov-age", "ov_age", "Age group", S0, "o_ageg", univ("ageg")), 12, 15, 1, 5),
+        (ctl_list("c-ov-gender", "ov_gender", "Gender", S0, "o_gender", univ("gender")), 15, 17, 1, 5),
+        (ctl_list("c-ov-risk", "ov_risk", "Risk score", S0, "o_risk", univ("risk")), 17, 19, 1, 5),
+        (ctl_list("c-ov-mkt", "ov_mkt", "Member market", S0, "o_market", univ("market")), 19, 22, 1, 5),
+        (ctl_list("c-ov-inc", "ov_inc", "Income quartile", S0, "o_incq", univ("incq")), 22, 25, 1, 5),
     ]
     nodes.append(place(filter_bar(1, ctls), 13, 18))
 
@@ -532,15 +556,7 @@ def geo_metric(tbl):
 def page_geo():
     nodes = [header(2, "Geographic Analysis", "Where Ohio members live, where they get care, and where cost and denials concentrate.")]
     T, S = GEO, "t-geo"
-    ctls = [
-        (ctl_date("c-g-date", "g_date", "Service date", [(S, "g_sdate")]), 1, 7, 1, 5),
-        (ctl_list("c-g-mkt", "g_mkt", "Member market", S, "g_market", [(S, "g_market")]), 7, 11, 1, 5),
-        (ctl_list("c-g-plan", "g_plan", "Plan", S, "g_plan", [(S, "g_plan")]), 11, 15, 1, 5),
-        (ctl_list("c-g-inc", "g_inc", "Income quartile", S, "g_incq", [(S, "g_incq")]), 15, 19, 1, 5),
-        (ctl_list("c-g-age", "g_age", "Age group", S, "g_ageg", [(S, "g_ageg")]), 19, 22, 1, 5),
-        (ctl_list("c-g-class", "g_class", "Encounter class", S, "g_eclass", [(S, "g_eclass")]), 22, 25, 1, 5),
-    ]
-    nodes.append(place(filter_bar(2, ctls), 13, 18))
+    nodes.append(local_bar(2, "Use the map metric selector below to change what the map and rankings show."))
 
     k = [
         ("g-k1", "Paid", "Sum(%s)" % R(T, "Paid Amount"), MONEY_S, "higher"),
@@ -649,15 +665,9 @@ def page_geo():
 def page_proc():
     nodes = [header(3, "Procedure Analysis", "Which procedures drive spend, where unit costs diverge, and which carry denial risk.")]
     T, S = PRC, "t-proc"
-    ctls = [
-        (ctl_date("c-p-date", "p_date", "Service date", [(S, "p_sdate")]), 1, 7, 1, 5),
-        (ctl_list("c-p-class", "p_class", "Encounter class", S, "p_eclass", [(S, "p_eclass")]), 7, 11, 1, 5),
-        (ctl_list("c-p-plan", "p_plan", "Plan", S, "p_plan", [(S, "p_plan")]), 11, 15, 1, 5),
-        (ctl_list("c-p-cost", "p_cost", "Cost category", S, "p_costcat", [(S, "p_costcat")]), 15, 19, 1, 5),
-        (ctl_list("c-p-age", "p_age", "Age group", S, "p_ageg", [(S, "p_ageg")]), 19, 22, 1, 5),
-        (ctl_text_filter("c-p-search", "p_search", "Procedure search", [(S, "p_proc")]), 22, 25, 1, 5),
-    ]
-    nodes.append(place(filter_bar(3, ctls), 13, 18))
+    nodes.append(local_bar(3, "Cost category and procedure search are local to this tab.", [
+        (ctl_list("c-p-cost", "p_cost", "Cost category", S, "p_costcat", [(S, "p_costcat")]), 19, 22, 1, 5),
+        (ctl_text_filter("c-p-search", "p_search", "Procedure search", [(S, "p_proc")]), 22, 25, 1, 5)]))
     k = [
         ("p-k1", "Procedures Billed", "CountDistinct(%s)" % R(T, "Procedure Code"), INT, "higher"),
         ("p-k2", "Paid", "Sum(%s)" % R(T, "Paid Amount"), MONEY_S, "higher"),
@@ -741,16 +751,16 @@ def page_fraud():
     T, S = FRD, "t-fr"
     # --- detection controls --------------------------------------------------------------------
     ctls = [
-        (ctl_date("c-f-date", "f_date", "Service date", [(S, "f_sdate")]), 1, 7, 1, 5),
-        (ctl_list("c-f-plan", "f_plan", "Plan", S, "f_plan", [(S, "f_plan")]), 7, 11, 1, 5),
-        (ctl_list("c-f-class", "f_class", "Encounter class", S, "f_eclass", [(S, "f_eclass")]), 11, 15, 1, 5),
-        (ctl_list("c-f-mkt", "f_mkt", "Facility market", S, "f_fmarket", [(S, "f_fmarket")]), 15, 19, 1, 5),
         (ctl_text_filter("c-f-search", "f_search", "Provider search", [(S, "f_pname")]), 19, 25, 1, 5),
         (ctl_slider("c-f-minlines", "min_lines", "Min claim lines to score a provider", 50, 2000, 50, 200), 1, 9, 6, 10),
         (ctl_slider("c-f-ext", "ext_mult", "Extreme cost = × procedure average", 1.5, 10, 0.5, 2.5), 9, 17, 6, 10),
         (ctl_slider("c-f-alert", "alert_score", "Critical alert score", 20, 80, 5, 40), 17, 25, 6, 10),
     ]
-    nodes.append(place(filter_bar(4, ctls), 13, 24))
+    add(text("note-4", '<span style="color:%s">**Universal filters apply to this tab.**</span>　<span style="color:%s">Set date, plan, encounter class, age, gender, risk, market and income on the Overview tab; detection thresholds below are local.</span>' % (NAVY, MUTED), verticalAlign="center"))
+    add(button("b-edit-filters-4", "Edit filters on Overview", [{"effect": "navigate", "target": {"type": "page", "page": PG_OV}}], bg=BLUE))
+    fb = filter_bar(4, ctls)
+    fb.kids += [el("note-4", 1, 13, 1, 5), el("b-edit-filters-4", 13, 19, 1, 5)]
+    nodes.append(place(fb, 13, 24))
 
     PRt = PR
     k = [
