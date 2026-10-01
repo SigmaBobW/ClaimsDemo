@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Decomposition Tree — Sigma Plugin</title>
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@sigmacomputing/plugin@1.2.0/dist/umd/sigmacomputing-plugin.umd.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:-apple-system,BlinkMacSystemFont,Inter,Segoe UI,Roboto,Arial,sans-serif;background:transparent;color:#1F2933;overflow:hidden}
+  #wrap{height:100%;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:14px;gap:0;position:relative}
+  .node{background:#fff;border:1px solid #DCE1E6;border-radius:10px;box-shadow:0 1px 3px rgba(16,24,40,.08);cursor:pointer;user-select:none;transition:box-shadow .12s,border-color .12s;position:relative}
+  .node:hover{box-shadow:0 4px 14px rgba(16,24,40,.16);border-color:#B7C0C9}
+  .node.selected{border-color:#2E6FF2;box-shadow:0 0 0 2px rgba(46,111,242,.25)}
+  .node.dim{opacity:.45}
+  #total{width:220px;padding:12px 16px;margin-bottom:2px}
+  .lbl{font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#8A94A0}
+  .val{font-size:22px;font-weight:800;line-height:1.15;margin-top:2px}
+  .varr{display:flex;align-items:center;gap:4px;font-size:11px;font-weight:700;margin-top:4px}
+  .varr.up{color:#0F9D58}
+  .varr.down{color:#D0342C}
+  .varr.flat{color:#8A94A0}
+  #stem{width:2px;height:20px;background:#DCE1E6}
+  #rail{height:2px;background:#DCE1E6}
+  #children{display:flex;align-items:flex-start;gap:22px}
+  .branch{display:flex;flex-direction:column;align-items:center}
+  .drop{width:2px;height:16px;background:#DCE1E6}
+  .child{width:150px;padding:10px 12px}
+  .child .val{font-size:16px}
+  .corners{display:flex;justify-content:space-between;margin-top:8px;padding-top:6px;border-top:1px solid #EEF1F4;gap:8px}
+  .corner{font-size:9px;color:#8A94A0;line-height:1.3}
+  .corner b{display:block;font-size:11px;font-weight:700;color:#3C4650}
+  .corner.right{text-align:right}
+  .expand-hint{text-align:center;font-size:9px;color:#B7C0C9;margin-top:6px}
+  #grandkids{display:flex;gap:14px;margin-top:0}
+  .gdrop{width:2px;height:14px;background:#DCE1E6;margin:0 auto}
+  .gnode{width:130px;padding:8px 10px}
+  .gnode .lbl{font-size:9px}
+  .gnode .val{font-size:14px}
+  #empty{font-size:12px;color:#8A94A0}
+  #note{position:absolute;top:4px;right:8px;font-size:9px;color:#B7C0C9;letter-spacing:.04em;text-transform:uppercase}
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+(function(){
+  var SDK = window.SigmaPlugin || (window.sigmaComputing && window.sigmaComputing.plugin) || window["@sigmacomputing/plugin"];
+  if(!SDK || !SDK.client || !window.React || !window.ReactDOM){
+    document.getElementById('root').innerHTML = '<div id="wrap"><div id="empty">Plugin SDK failed to load. Reload the workbook; if it persists, check the plugin URL is publicly accessible.</div></div>';
+    return;
+  }
+  var h = React.createElement;
+
+  var defs=[
+    {name:'source',type:'element'},
+    {name:'category',type:'column',source:'source',label:'Category (breakdown dimension)'},
+    {name:'value',type:'column',source:'source',allowedTypes:['number','integer'],label:'Main value column'},
+    {name:'aggregation',type:'dropdown',values:['sum','avg'],defaultValue:'sum',label:'Aggregation'},
+    {name:'priorValue',type:'column',source:'source',allowedTypes:['number','integer'],label:'Comparison value (variance vs.)'},
+    {name:'cornerLeft',type:'column',source:'source',allowedTypes:['number','integer'],label:'Bottom-left corner metric'},
+    {name:'cornerLeftLabel',type:'text',label:'Bottom-left corner label',defaultValue:'Loyalty'},
+    {name:'cornerRight',type:'column',source:'source',allowedTypes:['number','integer'],label:'Bottom-right corner metric'},
+    {name:'cornerRightLabel',type:'text',label:'Bottom-right corner label',defaultValue:'Non-Loyalty'},
+    {name:'totalLabel',type:'text',label:'Total box label',defaultValue:'Total'},
+    {name:'valueFormat',type:'dropdown',values:['currency','number'],defaultValue:'currency',label:'Value format'},
+    {name:'clickTarget',type:'variable',label:'Select → variable (drill selection)'},
+    {name:'onSelect',type:'action-trigger',label:'Select → action (optional)'}
+  ];
+  SDK.client.config.configureEditorPanel(defs);
+
+  function fmt(v,f){
+    if(v==null||isNaN(v)) return '—';
+    var n=Number(v), sign=n<0?'-':'', a=Math.abs(n), s;
+    if(a>=1e9) s=(a/1e9).toFixed(2)+'B';
+    else if(a>=1e6) s=(a/1e6).toFixed(2)+'M';
+    else if(a>=1e3) s=(a/1e3).toFixed(1)+'k';
+    else s=a.toFixed(f==='currency'?0:1);
+    return sign+(f==='currency'?'$':'')+s;
+  }
+  function agg(arr,mode){
+    var vals=arr.map(Number).filter(function(x){return !isNaN(x);});
+    if(!vals.length) return 0;
+    var sum=vals.reduce(function(a,b){return a+b;},0);
+    return mode==='avg' ? sum/vals.length : sum;
+  }
+  function pctVar(cur,prior){
+    if(prior==null||prior===0||isNaN(prior)) return null;
+    return (cur-prior)/Math.abs(prior)*100;
+  }
+  function synth(){
+    return {
+      cats: ['Fuel','Merch','LFK','QSR'],
+      vals: [1306000, 1825000, 520000, 837000],
+      prior: [1220000, 1900000, 480000, 810000],
+      cl: [812000, 1180000, 322000, 566000],
+      cr: [494000, 645000, 198000, 271000],
+      cornerLeftLabel: 'Loyalty', cornerRightLabel: 'Non-Loyalty', totalLabel: 'Total'
+    };
+  }
+
+  function VarrEl(pv){
+    if(pv==null) return h('div',{className:'varr flat'},'—');
+    var up=pv>0.05, down=pv<-0.05;
+    var arrow=up?'▲ ':down?'▼ ':'▬ ';
+    return h('div',{className:'varr '+(up?'up':down?'down':'flat')}, arrow+Math.abs(pv).toFixed(1)+'%');
+  }
+
+  function App(){
+    var config = SDK.useConfig();
+    var data = SDK.useElementData(config.source || '');
+    var varTuple = SDK.useVariable(config.clickTarget || '');
+    var selected = varTuple[0], setSelected = varTuple[1];
+    var triggerOnSelect = SDK.useActionTrigger(config.onSelect || '');
+    var expandTuple = React.useState(null);
+    var expanded = expandTuple[0], setExpanded = expandTuple[1];
+
+    var d = data, c = config;
+    var live = d && c.category && c.value && d[c.category] && d[c.value];
+    var cats, vals, prior, cl, cr, cornerLeftLabel, cornerRightLabel, totalLabel;
+    if(live){
+      cats=d[c.category]; vals=d[c.value]; prior=c.priorValue?d[c.priorValue]:null;
+      cl=c.cornerLeft?d[c.cornerLeft]:null; cr=c.cornerRight?d[c.cornerRight]:null;
+      cornerLeftLabel=c.cornerLeftLabel||'Left'; cornerRightLabel=c.cornerRightLabel||'Right'; totalLabel=c.totalLabel||'Total';
+    } else {
+      var s=synth();
+      cats=s.cats; vals=s.vals; prior=s.prior; cl=s.cl; cr=s.cr;
+      cornerLeftLabel=s.cornerLeftLabel; cornerRightLabel=s.cornerRightLabel; totalLabel=s.totalLabel;
+    }
+
+    var byCategory={}, order=[];
+    for(var i=0;i<cats.length;i++){
+      var k=String(cats[i]);
+      if(!byCategory[k]){ byCategory[k]={v:[],p:[],l:[],r:[]}; order.push(k); }
+      byCategory[k].v.push(vals[i]);
+      if(prior) byCategory[k].p.push(prior[i]);
+      if(cl) byCategory[k].l.push(cl[i]);
+      if(cr) byCategory[k].r.push(cr[i]);
+    }
+    var mode=c.aggregation||'sum', vf=c.valueFormat||'currency';
+    var totalV=agg(vals,mode), totalP=prior?agg(prior,'sum'):null;
+
+    async function handleClick(k){
+      if(k===''){
+        setSelected(''); setExpanded(null);
+        if(triggerOnSelect) await triggerOnSelect();
+        return;
+      }
+      var wasSelected = selected===k;
+      setSelected(wasSelected ? '' : String(k));
+      setExpanded(wasSelected ? null : k);
+      if(triggerOnSelect) await triggerOnSelect();
+    }
+
+    var children = [];
+    if(!live) children.push(h('div',{id:'note',key:'note'},'illustrative'));
+
+    var totalNode = h('div',{
+      key:'total', id:'total',
+      className:'node'+(selected?' dim':''),
+      onClick: function(){ handleClick(''); }
+    }, [
+      h('div',{className:'lbl',key:'l'}, totalLabel),
+      h('div',{className:'val',key:'v'}, fmt(totalV,vf)),
+      VarrEl(prior?pctVar(totalV,totalP):null)
+    ]);
+    children.push(totalNode);
+    children.push(h('div',{id:'stem',key:'stem'}));
+    children.push(h('div',{id:'rail',key:'rail',style:{width:(order.length*172-22)+'px'}}));
+
+    var kids = order.map(function(k){
+      var g=byCategory[k];
+      var v=agg(g.v,mode), p=g.p.length?agg(g.p,'sum'):null;
+      var l=g.l.length?agg(g.l,'sum'):null, r=g.r.length?agg(g.r,'sum'):null;
+      var nodeChildren = [
+        h('div',{className:'lbl',key:'l'}, k),
+        h('div',{className:'val',key:'v'}, fmt(v,vf)),
+        VarrEl(g.p.length?pctVar(v,p):null)
+      ];
+      var canExpand = !!(cl || cr);
+      if(canExpand){
+        nodeChildren.push(h('div',{className:'corners',key:'corners'},[
+          h('div',{className:'corner',key:'cl'},[cornerLeftLabel, h('b',{key:'b'}, l!=null?fmt(l,vf):'—')]),
+          h('div',{className:'corner right',key:'cr'},[cornerRightLabel, h('b',{key:'b'}, r!=null?fmt(r,vf):'—')]),
+        ]));
+        nodeChildren.push(h('div',{className:'expand-hint',key:'hint'}, expanded===k ? '▾ hide breakdown' : '▸ click to expand'));
+      }
+      var branchChildren = [
+        h('div',{className:'drop',key:'drop'}),
+        h('div',{
+          className:'node child'+(selected===k?' selected':(selected?' dim':'')),
+          onClick: function(){ handleClick(k); }
+        }, nodeChildren)
+      ];
+      if(canExpand && expanded===k){
+        branchChildren.push(h('div',{className:'gdrop',key:'gdrop'}));
+        branchChildren.push(h('div',{id:'grandkids',key:'grandkids'},[
+          h('div',{className:'node gnode',key:'gl'},[
+            h('div',{className:'lbl',key:'l'}, cornerLeftLabel),
+            h('div',{className:'val',key:'v'}, l!=null?fmt(l,vf):'—')
+          ]),
+          h('div',{className:'node gnode',key:'gr'},[
+            h('div',{className:'lbl',key:'l'}, cornerRightLabel),
+            h('div',{className:'val',key:'v'}, r!=null?fmt(r,vf):'—')
+          ])
+        ]));
+      }
+      return h('div',{className:'branch',key:k}, branchChildren);
+    });
+    children.push(h('div',{id:'children',key:'kids'}, kids));
+
+    return h('div',{id:'wrap'}, children);
+  }
+
+  ReactDOM.render(h(App), document.getElementById('root'));
+})();
+</script>
+</body>
+</html>
