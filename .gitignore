@@ -19,3 +19,8 @@ __pycache__/
 
 # Local Netlify folder
 .netlify
+ibx/__pycache__/
+ibx/spec.json
+ibx/probe.py
+ibx/t1.py
+ibx/t2.py
